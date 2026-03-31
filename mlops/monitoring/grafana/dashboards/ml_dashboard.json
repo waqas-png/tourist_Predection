@@ -1,0 +1,132 @@
+{
+  "uid": "tourism-mlops-v1",
+  "title": "Tourism ML API — Monitoring",
+  "tags": ["mlops", "tourism", "ml"],
+  "timezone": "browser",
+  "refresh": "15s",
+  "schemaVersion": 38,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Prediction Requests",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(prediction_requests_total)",
+          "legendFormat": "Total Requests"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Success vs Error Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 6, "y": 0, "w": 10, "h": 4 },
+      "targets": [
+        {
+          "expr": "rate(prediction_requests_total{status='success'}[1m])",
+          "legendFormat": "Success/s"
+        },
+        {
+          "expr": "rate(prediction_requests_total{status='error'}[1m])",
+          "legendFormat": "Error/s"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Error Rate %",
+      "type": "gauge",
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "expr": "100 * rate(prediction_requests_total{status='error'}[5m]) / rate(prediction_requests_total[5m])",
+          "legendFormat": "Error %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0, "max": 100, "unit": "percent",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "API Uptime",
+      "type": "stat",
+      "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "expr": "up{job='tourism-api'}",
+          "legendFormat": "API Status"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "mappings": [
+          { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "title": "Prediction Latency (p50 / p95 / p99)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(prediction_latency_seconds_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(prediction_latency_seconds_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(prediction_latency_seconds_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 6,
+      "title": "Last Predicted Tourism Arrivals",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "predicted_arrivals_last",
+          "legendFormat": "Predicted Arrivals"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    }
+  ],
+  "time": { "from": "now-1h", "to": "now" }
+}

@@ -1,0 +1,50 @@
+{
+  "family": "tourism-ml-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn":      "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskRole",
+
+  "containerDefinitions": [
+    {
+      "name": "tourism-api",
+      "image": "YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/tourism-ml-api:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 8000, "hostPort": 8000, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "ENV", "value": "production" }
+      ],
+      "secrets": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group":         "/ecs/tourism-ml-api",
+          "awslogs-region":        "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"
+        ],
+        "interval": 30,
+        "timeout":  5,
+        "retries":  3,
+        "startPeriod": 15
+      },
+      "readonlyRootFilesystem": false,
+      "user": "appuser"
+    }
+  ],
+
+  "tags": [
+    { "key": "Project",     "value": "tourism-mlops" },
+    { "key": "Environment", "value": "production" },
+    { "key": "ManagedBy",   "value": "github-actions" }
+  ]
+}

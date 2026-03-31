@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Tourism ML API — ECS Fargate + ALB + ECR + CloudWatch"
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [production, staging]
+
+  ContainerImage:
+    Type: String
+    Description: "Full ECR image URI  e.g. 123456.dkr.ecr.us-east-1.amazonaws.com/tourism-ml-api:latest"
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "At least 2 public subnets for ALB"
+
+Resources:
+
+  # ── ECR Repository ─────────────────────────────────────────
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: tourism-ml-api
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [{
+              "rulePriority": 1,
+              "description": "Keep last 10 images",
+              "selection": { "tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 10 },
+              "action": { "type": "expire" }
+            }]
+          }
+
+  # ── ECS Cluster ────────────────────────────────────────────
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: tourism-mlops-cluster
+      CapacityProviders: [FARGATE, FARGATE_SPOT]
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # ── CloudWatch Log Group ───────────────────────────────────
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/tourism-ml-api
+      RetentionInDays: 14
+
+  # ── ALB Security Group ─────────────────────────────────────
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP/HTTPS to ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+
+  # ── Application Load Balancer ──────────────────────────────
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: tourism-ml-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups: [!Ref ALBSecurityGroup]
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: tourism-api-tg
+      Port: 8000
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+  # ── ECS Service ────────────────────────────────────────────
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName: tourism-api-service
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DesiredCount: 2
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: tourism-api
+          ContainerPort: 8000
+          TargetGroupArn: !Ref ALBTargetGroup
+
+Outputs:
+  ALBURL:
+    Description: "Public URL of the Load Balancer"
+    Value: !Sub "http://${ALB.DNSName}"
+  ECRRepositoryURI:
+    Value: !GetAtt ECRRepository.RepositoryUri

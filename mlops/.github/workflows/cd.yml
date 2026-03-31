@@ -1,0 +1,78 @@
+name: CD — Deploy to AWS ECS
+
+on:
+  workflow_run:
+    workflows: ["CI — Test & Build"]
+    branches: [main]
+    types: [completed]
+
+env:
+  AWS_REGION:       us-east-1
+  ECS_CLUSTER:      tourism-mlops-cluster
+  ECS_SERVICE:      tourism-api-service
+  CONTAINER_NAME:   tourism-api
+
+jobs:
+
+  deploy:
+    name: Deploy to ECS (Fargate)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Fill the image ID into the ECS task definition
+      - name: Update ECS task definition with new image
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: aws/ecs-task-definition.json
+          container-name:  ${{ env.CONTAINER_NAME }}
+          image:           "${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}"
+
+      # Deploy to ECS (rolling update, zero-downtime)
+      - name: Deploy to ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition:       ${{ steps.task-def.outputs.task-definition }}
+          service:               ${{ env.ECS_SERVICE }}
+          cluster:               ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Smoke test after deploy
+        run: |
+          sleep 20
+          API_URL="${{ secrets.API_URL }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/health")
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test FAILED — health check returned HTTP $STATUS"
+            exit 1
+          fi
+          echo "Smoke test PASSED — API is healthy"
+
+      - name: Notify on failure (Slack)
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": ":red_circle: *Deploy FAILED* for `${{ github.repository }}` on branch `main`.\nCommit: `${{ github.sha }}`"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
